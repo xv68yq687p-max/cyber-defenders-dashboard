@@ -7,37 +7,205 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100">
-<header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
-<div class="max-w-7xl mx-auto px-4 py-4 space-y-3">
-<h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
-<div class="flex items-center gap-3">
-<input id="apiBase" class="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800" placeholder="https://cyber-defenders-dashboard.<konto>.workers.dev">
-<button id="saveBase" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700">Lagre</button>
-<button id="testBtn" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">Test</button>
-<span id="connStatus" class="text-sm"></span>
-</div>
-<div class="flex items-center gap-3">
-<span id="last-updated" class="text-sm text-slate-300">Ikke tilkoblet</span>
-<button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater</button>
-<button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
-<button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
-</div>
-</div>
-</header>
-<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-<section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
-<textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800" readonly></textarea>
-</main>
-<script>
-function getApiBase(){return (localStorage.getItem('apiBase')||'').replace(/\/+$/, '');}
-function setApiBase(v){localStorage.setItem('apiBase',(v||'').trim());}
-async function safeFetch(url,opt={}){return fetch(url,{mode:'cors',...opt});}
-const apiBaseInput=document.getElementById('apiBase');apiBaseInput.value=getApiBase();
-document.getElementById('saveBase').onclick=()=>{setApiBase(apiBaseInput.value);document.getElementById('connStatus').textContent='Lagret';}
-document.getElementById('testBtn').onclick=async()=>{try{const r=await safeFetch(getApiBase()+'/api/health');if(!r.ok)throw 0;document.getElementById('connStatus').textContent='OK';}catch{document.getElementById('connStatus').textContent='Feil';}};
-document.getElementById('refreshBtn').onclick=()=>safeFetch(getApiBase()+'/api/refresh',{method:'POST'});
-document.getElementById('reportBtn').onclick=async()=>{const r=await safeFetch(getApiBase()+'/api/report');const t=await r.text();document.getElementById('report').value=t;document.getElementById('speakBtn').disabled=false;}
-document.getElementById('speakBtn').onclick=()=>{const t=document.getElementById('report').value;if(!t)return;const u=new SpeechSynthesisUtterance(t);u.lang='nb-NO';speechSynthesis.speak(u);};
-</script>
+  <header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 py-4 space-y-3">
+      <h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
+      <div class="flex flex-col sm:flex-row items-center gap-3">
+        <input id="apiBase" class="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-400" placeholder="https://cyber-defenders-dashboard.<konto>.workers.dev" value="https://cyber-defenders-dashboard.frqkb7zyfq.workers.dev">
+        <div class="flex items-center gap-2">
+          <button id="saveBase" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700">Lagre</button>
+          <button id="testBtn" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">Test</button>
+          <span id="connStatus" class="text-sm text-slate-300"></span>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="last-updated" class="text-sm text-slate-300">Ikke tilkoblet</span>
+        <button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater nå</button>
+        <button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
+        <button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
+      </div>
+    </div>
+  </header>
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
+    <section>
+      <h2 class="text-lg font-semibold mb-2">Morgenrapport</h2>
+      <textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-100" placeholder="Klikk 'Generer rapport'" readonly></textarea>
+    </section>
+  </main>
+  <script>
+    "use strict";
+    const CATEGORIES = [
+      {key: "global", name: "Store globale cyberhendelser"},
+      {key: "norway", name: "Cyberhendelser i Norge"},
+      {key: "reports", name: "Viktige rapporter"},
+      {key: "social_cyberforsvaret", name: "Sosiale medier – Cyberforsvaret"},
+      {key: "milno_mentions", name: "Trusselomtale av mil.no"},
+      {key: "media_cyberforsvaret", name: "Norske medier – Cyberforsvaret"},
+      {key: "mil_ops_analysis", name: "Analyser av militære cyberoperasjoner"}
+    ];
+
+    function getApiBase() {
+      return (localStorage.getItem('apiBase') || 'https://cyber-defenders-dashboard.frqkb7zyfq.workers.dev').replace(/\/+$/, '');
+    }
+
+    function setApiBase(value) {
+      localStorage.setItem('apiBase', (value || '').trim());
+    }
+
+    async function safeFetch(url, options = {}) {
+      try {
+        return await fetch(url, { mode: 'cors', ...options });
+      } catch (e) {
+        console.error('Fetch error:', e);
+        throw e;
+      }
+    }
+
+    function timeAgo(iso) {
+      const d = new Date(iso), now = new Date();
+      const timeDiffSec = Math.max(0, (now - d) / 1000);
+      const h = Math.floor(timeDiffSec / 3600);
+      if (h < 1) return String(Math.floor(timeDiffSec / 60)) + " min siden";
+      if (h < 24) return String(h) + " t siden";
+      return d.toLocaleString('no-NO');
+    }
+
+    function makeItemHtml(it) {
+      return `<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>` +
+             `<div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>`;
+    }
+
+    async function load() {
+      const apiBase = getApiBase();
+      const cardsEl = document.getElementById('cards');
+      const lastUpdatedEl = document.getElementById('last-updated');
+      lastUpdatedEl.textContent = 'Laster…';
+      cardsEl.innerHTML = '';
+
+      const tpl = document.createElement('template');
+      tpl.innerHTML = `
+        <article class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="font-semibold"></h2>
+            <span class="text-xs rounded-lg px-2 py-1 bg-slate-800"></span>
+          </div>
+          <ul class="space-y-2"></ul>
+          <div class="text-sm text-slate-400 mt-2 empty:hidden"></div>
+        </article>
+      `;
+
+      for (const cat of CATEGORIES) {
+        try {
+          const res = await safeFetch(`${apiBase}/api/items?category=${encodeURIComponent(cat.key)}`);
+          const data = await res.json();
+          const node = tpl.content.cloneNode(true);
+          const art = node.querySelector('article');
+          art.querySelector('h2').textContent = cat.name;
+          art.querySelector('span').textContent = `${(data.items && data.items.length) || 0} funn`;
+          const ul = art.querySelector('ul');
+          if (!data.items || data.items.length === 0) {
+            art.querySelector('div').textContent = 'Intet spesielt å rapportere';
+          } else {
+            const upto = Math.min(5, data.items.length);
+            for (let j = 0; j < upto; j++) {
+              const it = data.items[j];
+              const li = document.createElement('li');
+              li.innerHTML = makeItemHtml(it);
+              ul.appendChild(li);
+            }
+            if (data.items.length > 5) {
+              const more = document.createElement('button');
+              more.className = 'mt-2 text-sm text-sky-400 hover:underline';
+              more.textContent = `Vis alle (${data.items.length})`;
+              more.onclick = () => {
+                ul.innerHTML = '';
+                for (const it of data.items) {
+                  const li = document.createElement('li');
+                  li.innerHTML = makeItemHtml(it);
+                  ul.appendChild(li);
+                }
+                more.remove();
+              };
+              art.appendChild(more);
+            }
+          }
+          cardsEl.appendChild(node);
+        } catch (e) {
+          console.error(`Failed to load category ${cat.key}:`, e);
+        }
+      }
+
+      try {
+        const health = await safeFetch(`${apiBase}/api/health`).then(r => r.json());
+        lastUpdatedEl.textContent = health.lastUpdate ? `Oppdatert ${timeAgo(health.lastUpdate)}` : 'Oppdatert nylig';
+      } catch (e) {
+        lastUpdatedEl.textContent = 'Ikke tilkoblet';
+      }
+    }
+
+    // Initialize API base input
+    const apiBaseInput = document.getElementById('apiBase');
+    apiBaseInput.value = getApiBase();
+
+    // Save API base
+    document.getElementById('saveBase').onclick = () => {
+      setApiBase(apiBaseInput.value);
+      document.getElementById('connStatus').textContent = 'Lagret';
+      load(); // Reload data with new API base
+    };
+
+    // Test connection
+    document.getElementById('testBtn').onclick = async () => {
+      const connStatus = document.getElementById('connStatus');
+      try {
+        const r = await safeFetch(`${getApiBase()}/api/health`);
+        if (!r.ok) throw new Error('Invalid response');
+        connStatus.textContent = 'Tilkobling OK';
+        connStatus.className = 'text-sm text-green-400';
+      } catch {
+        connStatus.textContent = 'Tilkoblingsfeil';
+        connStatus.className = 'text-sm text-red-400';
+      }
+    };
+
+    // Refresh data
+    document.getElementById('refreshBtn').onclick = async () => {
+      try {
+        await safeFetch(`${getApiBase()}/api/refresh`, { method: 'POST' });
+        load();
+      } catch (e) {
+        document.getElementById('connStatus').textContent = 'Feil ved oppdatering';
+        document.getElementById('connStatus').className = 'text-sm text-red-400';
+      }
+    };
+
+    // Generate report
+    document.getElementById('reportBtn').onclick = async () => {
+      try {
+        const r = await safeFetch(`${getApiBase()}/api/report`);
+        const txt = await r.text();
+        const ta = document.getElementById('report');
+        ta.value = txt;
+        document.getElementById('speakBtn').disabled = false;
+      } catch (e) {
+        document.getElementById('connStatus').textContent = 'Feil ved rapportgenerering';
+        document.getElementById('connStatus').className = 'text-sm text-red-400';
+      }
+    };
+
+    // Speak report
+    document.getElementById('speakBtn').onclick = () => {
+      const text = document.getElementById('report').value;
+      if (!text) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'nb-NO';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    };
+
+    // Load data on page load
+    load();
+  </script>
 </body>
 </html>
