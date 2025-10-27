@@ -148,7 +148,7 @@ async function harvest(env: Env) {
           items = items.filter(x => /mil\.no/i.test(x.title) || /mil\.no/i.test(x.url));
         }
         list.push(...items);
-      } catch (e) {
+      } catch (_e) {
         // ignore one-off feed errors
       }
     }
@@ -206,7 +206,20 @@ async function generateReport(env: Env) {
   return [header, "", ...sections].join('\n\n');
 }
 
-// Inline copy of the index.html for convenience (served by the Worker on "/")
+/* ------------------------------- CORS ---------------------------------- */
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, x-admin-token",
+};
+function withCors(resp: Response, extra: Record<string,string> = {}) {
+  const headers = new Headers(resp.headers);
+  for (const [k,v] of Object.entries({ ...CORS_HEADERS, ...extra })) headers.set(k, v);
+  return new Response(resp.body, { status: resp.status, headers });
+}
+
+/* -------------------------- Inline frontend ----------------------------- */
+// Innebygd HTML som serveres på "/". Inneholder en definert timeAgo() I FRONTENDEN.
 const INDEX_HTML = `
 <!doctype html>
 <html lang="no">
@@ -259,16 +272,24 @@ const INDEX_HTML = `
       {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"}
     ];
 
+    // Definer timeAgo() i frontenden (ikke på serveren)
+    function timeAgo(iso) {
+      const d = new Date(iso), now = new Date();
+      const diffSec = Math.max(0, (now - d) / 1000);
+      const h = Math.floor(diffSec / 3600);
+      if (h < 1) return \`\${Math.floor(diffSec/60)} min siden\`;
+      if (h < 24) return \`\${h} t siden\`;
+      return d.toLocaleString('no-NO');
+    }
+
     const cardsEl = document.getElementById('cards');
     const tpl = document.getElementById('card-tpl');
-
-
 
     async function load() {
       document.getElementById('last-updated').textContent = 'Laster…';
       cardsEl.innerHTML = '';
       for (const cat of CATEGORIES) {
-        const res = await fetch(\`/api/items?category=${cat.key}\`);
+        const res = await fetch(\`/api/items?category=\${cat.key}\`);
         const data = await res.json();
         const node = tpl.content.cloneNode(true);
         const art = node.querySelector('article');
@@ -280,20 +301,20 @@ const INDEX_HTML = `
         } else {
           (data.items.slice(0,5)).forEach(it => {
             const li = document.createElement('li');
-            li.innerHTML = \`<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>
-                            <div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>\`;
+            li.innerHTML = \`<a class="hover:underline" href="\${it.url}" target="_blank" rel="noopener">\${it.title}</a>
+                            <div class="text-xs text-slate-400">\${it.source} • \${timeAgo(it.published_at)}</div>\`;
             ul.appendChild(li);
           });
           if (data.items.length > 5) {
             const more = document.createElement('button');
             more.className = 'mt-2 text-sm text-sky-400 hover:underline';
-            more.textContent = \`Vis alle (${data.items.length})\`;
+            more.textContent = \`Vis alle (\${data.items.length})\`;
             more.onclick = () => {
               ul.innerHTML = '';
               data.items.forEach(it => {
                 const li = document.createElement('li');
-                li.innerHTML = \`<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>
-                                <div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>\`;
+                li.innerHTML = \`<a class="hover:underline" href="\${it.url}" target="_blank" rel="noopener">\${it.title}</a>
+                                <div class="text-xs text-slate-400">\${it.source} • \${timeAgo(it.published_at)}</div>\`;
                 ul.appendChild(li);
               });
               more.remove();
@@ -333,9 +354,9 @@ const INDEX_HTML = `
   </script>
 </body>
 </html>
-
 `;
 
+/* ------------------------------ Handler ------------------------------- */
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     await harvest(env);
@@ -344,28 +365,34 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
+    // CORS preflight
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
     if (url.pathname === "/api/health") {
       const lastUpdate = await env.STATE.get("lastUpdate");
-      return new Response(JSON.stringify({ lastUpdate }), { headers: {"content-type":"application/json"}});
+      return withCors(new Response(JSON.stringify({ lastUpdate }), { headers: {"content-type":"application/json"}}));
     }
 
     if (url.pathname === "/api/items") {
       const cat = url.searchParams.get("category") || "";
-      return getCategory(env, cat);
+      const resp = await getCategory(env, cat);
+      return withCors(resp);
     }
 
     if (url.pathname === "/api/report") {
       const txt = await generateReport(env);
-      return new Response(txt, { headers: { "content-type":"text/plain; charset=utf-8" }});
+      return withCors(new Response(txt, { headers: { "content-type":"text/plain; charset=utf-8" }}));
     }
 
     if (url.pathname === "/api/refresh" && req.method === "POST") {
       const token = req.headers.get("x-admin-token");
       if (env.ADMIN_TOKEN && token !== env.ADMIN_TOKEN) {
-        return new Response("Unauthorized", { status: 401 });
+        return withCors(new Response("Unauthorized", { status: 401 }));
       }
       await harvest(env);
-      return new Response("ok");
+      return withCors(new Response("ok"));
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
