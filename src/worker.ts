@@ -219,7 +219,7 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
 }
 
 /* -------------------------- Inline frontend ----------------------------- */
-// Innebygd HTML som serveres på "/". Inneholder en definert timeAgo() I FRONTENDEN.
+/* Viktig: alle `${…}` er escapet til `\${…}` slik at TS ikke interpolerer dem */
 const INDEX_HTML = `
 <!doctype html>
 <html lang="no">
@@ -272,7 +272,6 @@ const INDEX_HTML = `
       {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"}
     ];
 
-    // Definer timeAgo() i frontenden (ikke på serveren)
     function timeAgo(iso) {
       const d = new Date(iso), now = new Date();
       const diffSec = Math.max(0, (now - d) / 1000);
