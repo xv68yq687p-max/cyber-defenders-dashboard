@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cyber Defenders Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
+      <div class="flex items-center gap-3">
+        <span id="last-updated" class="text-sm text-slate-300">Laster…</span>
+        <button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater nå</button>
+        <button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
+        <button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
+    <template id="card-tpl">
+      <article class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-semibold"></h2>
+          <span class="text-xs rounded-lg px-2 py-1 bg-slate-800"></span>
+        </div>
+        <ul class="space-y-2"></ul>
+        <div class="text-sm text-slate-400 mt-2 empty:hidden"></div>
+      </article>
+    </template>
+
+    <section>
+      <h2 class="text-lg font-semibold mb-2">Morgenrapport</h2>
+      <textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800" placeholder="Klikk “Generer rapport”" readonly></textarea>
+    </section>
+  </main>
+
+  <script>
+    const CATEGORIES = [
+      {key:"global", name:"Store globale cyberhendelser"},
+      {key:"norway", name:"Cyberhendelser i Norge"},
+      {key:"reports", name:"Viktige rapporter"},
+      {key:"social_cyberforsvaret", name:"Sosiale medier – Cyberforsvaret"},
+      {key:"milno_mentions", name:"Trusselomtale av mil.no"},
+      {key:"media_cyberforsvaret", name:"Norske medier – Cyberforsvaret"},
+      {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"}
+    ];
+
+    const cardsEl = document.getElementById('cards');
+    const tpl = document.getElementById('card-tpl');
+
+    function timeAgo(iso) {
+      const d = new Date(iso), now = new Date();
+      const diff = Math.max(0, (now - d) / 1000);
+      const h = Math.floor(diff / 3600);
+      if (h < 1) return `${Math.floor(diff/60)} min siden`;
+      if (h < 24) return `${h} t siden`;
+      return d.toLocaleString('no-NO');
+    }
+
+    async function load() {
+      document.getElementById('last-updated').textContent = 'Laster…';
+      cardsEl.innerHTML = '';
+      for (const cat of CATEGORIES) {
+        const res = await fetch(`/api/items?category=${cat.key}`);
+        const data = await res.json();
+        const node = tpl.content.cloneNode(true);
+        const art = node.querySelector('article');
+        art.querySelector('h2').textContent = cat.name;
+        art.querySelector('span').textContent = (data.items?.length || 0) + ' funn';
+        const ul = art.querySelector('ul');
+        if (!data.items || data.items.length === 0) {
+          art.querySelector('div').textContent = 'Intet spesielt å rapportere';
+        } else {
+          (data.items.slice(0,5)).forEach(it => {
+            const li = document.createElement('li');
+            li.innerHTML = `<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>
+                            <div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>`;
+            ul.appendChild(li);
+          });
+          if (data.items.length > 5) {
+            const more = document.createElement('button');
+            more.className = 'mt-2 text-sm text-sky-400 hover:underline';
+            more.textContent = `Vis alle (${data.items.length})`;
+            more.onclick = () => {
+              ul.innerHTML = '';
+              data.items.forEach(it => {
+                const li = document.createElement('li');
+                li.innerHTML = `<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>
+                                <div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>`;
+                ul.appendChild(li);
+              });
+              more.remove();
+            };
+            art.appendChild(more);
+          }
+        }
+        cardsEl.appendChild(node);
+      }
+      const health = await fetch('/api/health').then(r=>r.json()).catch(()=>({}));
+      document.getElementById('last-updated').textContent = health.lastUpdate ? ('Oppdatert ' + timeAgo(health.lastUpdate)) : 'Oppdatert nylig';
+    }
+
+    document.getElementById('refreshBtn').onclick = async () => {
+      await fetch('/api/refresh', {method:'POST'});
+      load();
+    };
+
+    document.getElementById('reportBtn').onclick = async () => {
+      const res = await fetch('/api/report');
+      const txt = await res.text();
+      const ta = document.getElementById('report');
+      ta.value = txt;
+      document.getElementById('speakBtn').disabled = false;
+    };
+
+    document.getElementById('speakBtn').onclick = () => {
+      const text = document.getElementById('report').value;
+      if (!text) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'nb-NO';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    };
+
+    load();
+  </script>
+</body>
+</html>
