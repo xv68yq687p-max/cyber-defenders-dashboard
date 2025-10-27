@@ -93,7 +93,7 @@ async function fetchRSS(url: string): Promise<Item[]> {
 
   const items: Item[] = [];
   const feedItems = obj?.rss?.channel?.item || obj?.feed?.entry || [];
-  for (const it of Array.isArray(feedItems) ? feedItems : [feedItems]) {
+  for (const it of (Array.isArray(feedItems) ? feedItems : [feedItems])) {
     const title = it.title?.["#text"] || it.title || "(uten tittel)";
     const link  = it.link?.href || it.link || it.guid || it.id;
     const date  = it.pubDate || it.updated || it.published || it["dc:date"] || new Date().toISOString();
@@ -219,7 +219,7 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
 }
 
 /* -------------------------- Inline frontend ----------------------------- */
-/* Viktig: alle `${…}` er escapet til `\${…}` slik at TS ikke interpolerer dem */
+/* Merk: det finnes ingen `${...}` under; all strengbygging bruker + */
 const INDEX_HTML = `
 <!doctype html>
 <html lang="no">
@@ -262,7 +262,7 @@ const INDEX_HTML = `
   </main>
 
   <script>
-    const CATEGORIES = [
+    var CATEGORIES = [
       {key:"global", name:"Store globale cyberhendelser"},
       {key:"norway", name:"Cyberhendelser i Norge"},
       {key:"reports", name:"Viktige rapporter"},
@@ -273,49 +273,56 @@ const INDEX_HTML = `
     ];
 
     function timeAgo(iso) {
-      const d = new Date(iso), now = new Date();
-      const diffSec = Math.max(0, (now - d) / 1000);
-      const h = Math.floor(diffSec / 3600);
-      if (h < 1) return \`\${Math.floor(diffSec/60)} min siden\`;
-      if (h < 24) return \`\${h} t siden\`;
+      var d = new Date(iso), now = new Date();
+      var diffSec = Math.max(0, (now - d) / 1000);
+      var h = Math.floor(diffSec / 3600);
+      if (h < 1) return String(Math.floor(diffSec/60)) + " min siden";
+      if (h < 24) return String(h) + " t siden";
       return d.toLocaleString('no-NO');
     }
 
-    const cardsEl = document.getElementById('cards');
-    const tpl = document.getElementById('card-tpl');
+    var cardsEl = document.getElementById('cards');
+    var tpl = document.getElementById('card-tpl');
+
+    function makeItemHtml(it) {
+      return '<a class="hover:underline" href="' + it.url + '" target="_blank" rel="noopener">' + it.title + '</a>' +
+             '<div class="text-xs text-slate-400">' + it.source + ' • ' + timeAgo(it.published_at) + '</div>';
+    }
 
     async function load() {
       document.getElementById('last-updated').textContent = 'Laster…';
       cardsEl.innerHTML = '';
-      for (const cat of CATEGORIES) {
-        const res = await fetch(\`/api/items?category=\${cat.key}\`);
-        const data = await res.json();
-        const node = tpl.content.cloneNode(true);
-        const art = node.querySelector('article');
+      for (var i=0; i<CATEGORIES.length; i++) {
+        var cat = CATEGORIES[i];
+        var res = await fetch('/api/items?category=' + encodeURIComponent(cat.key));
+        var data = await res.json();
+        var node = tpl.content.cloneNode(true);
+        var art = node.querySelector('article');
         art.querySelector('h2').textContent = cat.name;
-        art.querySelector('span').textContent = (data.items?.length || 0) + ' funn';
-        const ul = art.querySelector('ul');
+        art.querySelector('span').textContent = String((data.items && data.items.length) || 0) + ' funn';
+        var ul = art.querySelector('ul');
         if (!data.items || data.items.length === 0) {
           art.querySelector('div').textContent = 'Intet spesielt å rapportere';
         } else {
-          (data.items.slice(0,5)).forEach(it => {
-            const li = document.createElement('li');
-            li.innerHTML = \`<a class="hover:underline" href="\${it.url}" target="_blank" rel="noopener">\${it.title}</a>
-                            <div class="text-xs text-slate-400">\${it.source} • \${timeAgo(it.published_at)}</div>\`;
+          var upto = Math.min(5, data.items.length);
+          for (var j=0; j<upto; j++) {
+            var it = data.items[j];
+            var li = document.createElement('li');
+            li.innerHTML = makeItemHtml(it);
             ul.appendChild(li);
-          });
+          }
           if (data.items.length > 5) {
-            const more = document.createElement('button');
+            var more = document.createElement('button');
             more.className = 'mt-2 text-sm text-sky-400 hover:underline';
-            more.textContent = \`Vis alle (\${data.items.length})\`;
-            more.onclick = () => {
+            more.textContent = 'Vis alle (' + data.items.length + ')';
+            more.onclick = function() {
               ul.innerHTML = '';
-              data.items.forEach(it => {
-                const li = document.createElement('li');
-                li.innerHTML = \`<a class="hover:underline" href="\${it.url}" target="_blank" rel="noopener">\${it.title}</a>
-                                <div class="text-xs text-slate-400">\${it.source} • \${timeAgo(it.published_at)}</div>\`;
-                ul.appendChild(li);
-              });
+              for (var k=0; k<data.items.length; k++) {
+                var it2 = data.items[k];
+                var li2 = document.createElement('li');
+                li2.innerHTML = makeItemHtml(it2);
+                ul.appendChild(li2);
+              }
               more.remove();
             };
             art.appendChild(more);
@@ -323,27 +330,31 @@ const INDEX_HTML = `
         }
         cardsEl.appendChild(node);
       }
-      const health = await fetch('/api/health').then(r=>r.json()).catch(()=>({}));
-      document.getElementById('last-updated').textContent = health.lastUpdate ? ('Oppdatert ' + timeAgo(health.lastUpdate)) : 'Oppdatert nylig';
+      try {
+        var health = await fetch('/api/health').then(function(r){return r.json()});
+        document.getElementById('last-updated').textContent = health.lastUpdate ? ('Oppdatert ' + timeAgo(health.lastUpdate)) : 'Oppdatert nylig';
+      } catch(e) {
+        document.getElementById('last-updated').textContent = 'Oppdatert nylig';
+      }
     }
 
-    document.getElementById('refreshBtn').onclick = async () => {
+    document.getElementById('refreshBtn').onclick = async function () {
       await fetch('/api/refresh', {method:'POST'});
       load();
     };
 
-    document.getElementById('reportBtn').onclick = async () => {
-      const res = await fetch('/api/report');
-      const txt = await res.text();
-      const ta = document.getElementById('report');
+    document.getElementById('reportBtn').onclick = async function () {
+      var res = await fetch('/api/report');
+      var txt = await res.text();
+      var ta = document.getElementById('report');
       ta.value = txt;
       document.getElementById('speakBtn').disabled = false;
     };
 
-    document.getElementById('speakBtn').onclick = () => {
-      const text = document.getElementById('report').value;
+    document.getElementById('speakBtn').onclick = function () {
+      var text = document.getElementById('report').value;
       if (!text) return;
-      const u = new SpeechSynthesisUtterance(text);
+      var u = new SpeechSynthesisUtterance(text);
       u.lang = 'nb-NO';
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
