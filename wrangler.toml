@@ -7,11 +7,11 @@ crons = ["*/15 * * * *"]
 
 [[kv_namespaces]]
 binding = "DASHBOARD_CACHE"
-id = "e9fc3c26-7433-41f5-b78d-88befee3b783"
+id = "b52e1a5169884dcd93a4b5227733f460"
 
 [[kv_namespaces]]
 binding = "STATE"
-id = "e9fc3c26-7433-41f5-b78d-88befee3b783"
+id = "c1c8fe1fe98b4bfd9c99682e18ce88e4"
 
 [vars]
 USE_NEWS_API = "false"
