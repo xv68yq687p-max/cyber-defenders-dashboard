@@ -262,13 +262,14 @@ const INDEX_HTML = `
     const cardsEl = document.getElementById('cards');
     const tpl = document.getElementById('card-tpl');
 
-    function timeAgo(iso) {
-      const d = new Date(iso), now = new Date();
-      const diff = Math.max(0, (now - d) / 1000);
-      const h = Math.floor(diff / 3600);
-      if (h < 1) return \`${Math.floor(diff/60)} min siden\`;
-      if (h < 24) return \`${h} t siden\`;
-      return d.toLocaleString('no-NO');
+function timeAgoIso(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffSec = Math.max(0, (now - then) / 1000);
+  const h = Math.floor(diffSec / 3600);
+  if (h < 1) return `${Math.floor(diffSec / 60)} min siden`;
+  if (h < 24) return `${h} t siden`;
+  return new Date(iso).toLocaleString('no-NO');
     }
 
     async function load() {
