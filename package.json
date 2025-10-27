@@ -1,15 +1,11 @@
 {
   "name": "cyber-defenders-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "typescript": "^5.6.3"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "fast-xml-parser": "^4.4.1"
