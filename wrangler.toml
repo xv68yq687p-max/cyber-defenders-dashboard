@@ -7,11 +7,11 @@ crons = ["*/15 * * * *"]
 
 [[kv_namespaces]]
 binding = "DASHBOARD_CACHE"
-id = "cyber-defenders-dashboard.frqkb7zyfq.workers.dev"
+id = "e9fc3c26-7433-41f5-b78d-88befee3b783"
 
 [[kv_namespaces]]
 binding = "STATE"
-id = "*-cyber-defenders-dashboard.frqkb7zyfq.workers.dev"
+id = "e9fc3c26-7433-41f5-b78d-88befee3b783"
 
 [vars]
 USE_NEWS_API = "false"
