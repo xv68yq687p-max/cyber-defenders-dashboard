@@ -1,5 +1,4 @@
 import { XMLParser } from 'fast-xml-parser';
-
 type Env = {
   DASHBOARD_CACHE: KVNamespace;
   STATE: KVNamespace;
@@ -8,7 +7,6 @@ type Env = {
   NEWSAPI_KEY?: string;
   BING_KEY?: string;
 };
-
 type Item = {
   id: string;
   title: string;
@@ -17,7 +15,6 @@ type Item = {
   published_at: string;
   category: string;
 };
-
 const CATEGORIES = [
   "global",
   "norway",
@@ -27,7 +24,6 @@ const CATEGORIES = [
   "media_cyberforsvaret",
   "mil_ops_analysis",
 ] as const;
-
 const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
   global: [
     "https://www.cisa.gov/news.xml",
@@ -71,9 +67,7 @@ const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
     "https://carnegieendowment.org/rss/solr?keywords=cyber%20operations",
   ],
 };
-
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
-
 function hash(s: string) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -82,21 +76,18 @@ function hash(s: string) {
   }
   return (h >>> 0).toString(16);
 }
-
 function toISO(d: Date | string | number) { return new Date(d).toISOString(); }
 function within24h(iso: string) { return (Date.now() - new Date(iso).getTime()) <= 24*3600*1000; }
-
 async function fetchRSS(url: string): Promise<Item[]> {
   const resp = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
   const txt = await resp.text();
   const obj = parser.parse(txt);
-
   const items: Item[] = [];
   const feedItems = obj?.rss?.channel?.item || obj?.feed?.entry || [];
   for (const it of (Array.isArray(feedItems) ? feedItems : [feedItems])) {
     const title = it.title?.["#text"] || it.title || "(uten tittel)";
-    const link  = it.link?.href || it.link || it.guid || it.id;
-    const date  = it.pubDate || it.updated || it.published || it["dc:date"] || new Date().toISOString();
+    const link = it.link?.href || it.link || it.guid || it.id;
+    const date = it.pubDate || it.updated || it.published || it["dc:date"] || new Date().toISOString();
     const urlStr = typeof link === "string" ? link : String(link);
     let hostname = "unknown";
     try { hostname = new URL(urlStr).hostname.replace(/^www\./,""); } catch {}
@@ -111,7 +102,6 @@ async function fetchRSS(url: string): Promise<Item[]> {
   }
   return items;
 }
-
 async function queryNews(env: Env, category: string, q: string): Promise<Item[]> {
   if (env.USE_NEWS_API !== "true") return [];
   const items: Item[] = [];
@@ -134,11 +124,10 @@ async function queryNews(env: Env, category: string, q: string): Promise<Item[]>
   }
   return items;
 }
-
 async function harvest(env: Env) {
   const nowISO = new Date().toISOString();
   for (const cat of CATEGORIES) {
-    const urls = RSS_SOURCES[cat];
+    const urls = RSS_SOURCESasian[cat];
     let list: Item[] = [];
     for (const u of urls) {
       try {
@@ -158,20 +147,17 @@ async function harvest(env: Env) {
     if (cat === "norway") {
       list.push(...await queryNews(env, cat, `cyberangrep OR dataangrep site:no`));
     }
-
     const seen = new Set<string>();
     list = list
       .filter(x => x.url && x.title)
       .filter(x => within24h(x.published_at))
       .filter(x => { if (seen.has(x.url)) return false; seen.add(x.url); return true; })
       .sort((a,b) => +new Date(b.published_at) - +new Date(a.published_at));
-
     const key = `cat:${cat}`;
     await env.DASHBOARD_CACHE.put(key, JSON.stringify({ items: list, updated_at: nowISO }), { expirationTtl: 48*3600 });
   }
   await env.STATE.put("lastUpdate", nowISO);
 }
-
 async function getCategory(env: Env, cat: string) {
   if (!CATEGORIES.includes(cat as any)) return new Response("Unknown category", { status: 400 });
   const key = `cat:${cat}`;
@@ -179,13 +165,11 @@ async function getCategory(env: Env, cat: string) {
   if (!raw) return new Response(JSON.stringify({ items: [] }), { headers: { "content-type":"application/json" }});
   return new Response(raw, { headers: { "content-type":"application/json" }});
 }
-
 function summarizeBlock(title: string, items: Item[]) {
   if (items.length === 0) return `${title}: Intet spesielt å rapportere.`;
   const top = items.slice(0,3).map(x => `– ${x.title} (${x.source})`).join('\n');
   return `${title} (${items.length} funn siste 24t):\n${top}`;
 }
-
 async function generateReport(env: Env) {
   const data: Record<string, {items: Item[]}> = {};
   for (const c of CATEGORIES) {
@@ -205,7 +189,6 @@ async function generateReport(env: Env) {
   const header = `Morgenrapport (${new Date(lastUpdate).toLocaleString('no-NO')}):`;
   return [header, "", ...sections].join('\n\n');
 }
-
 /* ------------------------------- CORS ---------------------------------- */
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -217,9 +200,7 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
   for (const [k,v] of Object.entries({ ...CORS_HEADERS, ...extra })) headers.set(k, v);
   return new Response(resp.body, { status: resp.status, headers });
 }
-
 /* -------------------------- Inline frontend ----------------------------- */
-/* Merk: det finnes ingen `${...}` under; all strengbygging bruker + */
 const INDEX_HTML = `
 <!doctype html>
 <html lang="no">
@@ -241,7 +222,6 @@ const INDEX_HTML = `
       </div>
     </div>
   </header>
-
   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
     <section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
     <template id="card-tpl">
@@ -254,14 +234,13 @@ const INDEX_HTML = `
         <div class="text-sm text-slate-400 mt-2 empty:hidden"></div>
       </article>
     </template>
-
     <section>
       <h2 class="text-lg font-semibold mb-2">Morgenrapport</h2>
       <textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800" placeholder="Klikk “Generer rapport”" readonly></textarea>
     </section>
   </main>
-
   <script>
+    "use strict";
     var CATEGORIES = [
       {key:"global", name:"Store globale cyberhendelser"},
       {key:"norway", name:"Cyberhendelser i Norge"},
@@ -271,24 +250,20 @@ const INDEX_HTML = `
       {key:"media_cyberforsvaret", name:"Norske medier – Cyberforsvaret"},
       {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"}
     ];
-
     function timeAgo(iso) {
       var d = new Date(iso), now = new Date();
-      var diffSec = Math.max(0, (now - d) / 1000);
-      var h = Math.floor(diffSec / 3600);
-      if (h < 1) return String(Math.floor(diffSec/60)) + " min siden";
+      var timeDiffSec = Math.max(0, (now - d) / 1000);
+      var h = Math.floor(timeDiffSec / 3600);
+      if (h < 1) return String(Math.floor(timeDiffSec/60)) + " min siden";
       if (h < 24) return String(h) + " t siden";
       return d.toLocaleString('no-NO');
     }
-
     var cardsEl = document.getElementById('cards');
     var tpl = document.getElementById('card-tpl');
-
     function makeItemHtml(it) {
       return '<a class="hover:underline" href="' + it.url + '" target="_blank" rel="noopener">' + it.title + '</a>' +
              '<div class="text-xs text-slate-400">' + it.source + ' • ' + timeAgo(it.published_at) + '</div>';
     }
-
     async function load() {
       document.getElementById('last-updated').textContent = 'Laster…';
       cardsEl.innerHTML = '';
@@ -337,12 +312,10 @@ const INDEX_HTML = `
         document.getElementById('last-updated').textContent = 'Oppdatert nylig';
       }
     }
-
     document.getElementById('refreshBtn').onclick = async function () {
       await fetch('/api/refresh', {method:'POST'});
       load();
     };
-
     document.getElementById('reportBtn').onclick = async function () {
       var res = await fetch('/api/report');
       var txt = await res.text();
@@ -350,7 +323,6 @@ const INDEX_HTML = `
       ta.value = txt;
       document.getElementById('speakBtn').disabled = false;
     };
-
     document.getElementById('speakBtn').onclick = function () {
       var text = document.getElementById('report').value;
       if (!text) return;
@@ -359,43 +331,35 @@ const INDEX_HTML = `
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
     };
-
     load();
   </script>
 </body>
 </html>
 `;
-
 /* ------------------------------ Handler ------------------------------- */
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     await harvest(env);
   },
-
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-
     // CORS preflight
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
-
     if (url.pathname === "/api/health") {
       const lastUpdate = await env.STATE.get("lastUpdate");
       return withCors(new Response(JSON.stringify({ lastUpdate }), { headers: {"content-type":"application/json"}}));
     }
-
     if (url.pathname === "/api/items") {
       const cat = url.searchParams.get("category") || "";
       const resp = await getCategory(env, cat);
       return withCors(resp);
     }
-
     if (url.pathname === "/api/report") {
       const txt = await generateReport(env);
       return withCors(new Response(txt, { headers: { "content-type":"text/plain; charset=utf-8" }}));
     }
-
     if (url.pathname === "/api/refresh" && req.method === "POST") {
       const token = req.headers.get("x-admin-token");
       if (env.ADMIN_TOKEN && token !== env.ADMIN_TOKEN) {
@@ -404,11 +368,9 @@ export default {
       await harvest(env);
       return withCors(new Response("ok"));
     }
-
     if (url.pathname === "/" || url.pathname === "/index.html") {
       return new Response(INDEX_HTML, { headers: { "content-type": "text/html; charset=utf-8" }});
     }
-
     return new Response("Not found", { status: 404 });
   }
 };
