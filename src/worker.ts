@@ -288,30 +288,43 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
   return new Response(resp.body, { status: resp.status, headers });
 }
 
-const INDEX_HTML = `<!doctype html>
-<html lang="no">
+const INDEX_HTML = `<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Cyber Defenders Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: system-ui; margin: 2rem; background: #0d1117; color: #c9d1d9; }
+    .hit { background: #161b22; margin: 1rem 0; padding: 1rem; border-radius: 8px; border-left: 4px solid #58a6ff; }
+    .score { color: #56d364; font-size: 0.8em; }
+    input { padding: 0.5rem; width: 100%; max-width: 500px; margin-bottom: 1rem; }
+    button { padding: 0.5rem 1rem; }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100">
-  <header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
-    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-      <h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
-      <div class="flex items-center gap-3">
-        <span id="last-updated" class="text-sm text-slate-300">Laster…</span>
-        <button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater nå</button>
-        <button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
-        <button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
-      </div>
-    </div>
-  </header>
-  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-    <section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
-    <template id="card-tpl">
-      <article class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="font-semibold"></h2>
-          <span class="text-xs rounded-lg px
+<body>
+  <h1>Cyber Defenders Dashboard</h1>
+  <input type="text" id="search" placeholder="Search cyber threats..." value="attack" />
+  <button onclick="search()">Search</button>
+  <div id="results">Loading...</div>
+
+  <script>
+    async function search() {
+      const q = encodeURIComponent(document.getElementById('search').value);
+      const res = await fetch(\`/api/search?q=\${q}\`);
+      const data = await res.json();
+      const html = data.hits && data.hits.length > 0
+        ? data.hits.map(h => \`
+            <div class="hit">
+              <h3><a href="\${h.url}" target="_blank">\${h.title}</a></h3>
+              <p>\${h.snippet}</p>
+              <span class="score">Relevance: \${(h.relevance||0).toFixed(3)}</span>
+            </div>
+          \`).join('')
+        : '<i>No relevant cyber threats found.</i>';
+      document.getElementById('results').innerHTML = html;
+    }
+    search();
+  </script>
+</body>
+</html>`;
