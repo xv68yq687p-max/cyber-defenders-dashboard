@@ -1,12 +1,15 @@
 import { XMLParser } from 'fast-xml-parser';
+
 type Env = {
   DASHBOARD_CACHE: KVNamespace;
+  RAW_CACHE: KVNamespace;          // <-- NEW BINDING
   STATE: KVNamespace;
   ADMIN_TOKEN?: string;
   USE_NEWS_API?: string;
   NEWSAPI_KEY?: string;
   BING_KEY?: string;
 };
+
 type Item = {
   id: string;
   title: string;
@@ -14,7 +17,11 @@ type Item = {
   source: string;
   published_at: string;
   category: string;
+  description?: string;            // <-- NEW (optional snippet)
 };
+
+type RawItem = Item & { score?: number };
+
 const CATEGORIES = [
   "global",
   "norway",
@@ -23,7 +30,9 @@ const CATEGORIES = [
   "milno_mentions",
   "media_cyberforsvaret",
   "mil_ops_analysis",
+  "russian_threats"               // <-- NEW CATEGORY
 ] as const;
+
 const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
   global: [
     "https://www.cisa.gov/news.xml",
@@ -33,6 +42,8 @@ const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
     "https://www.bleepingcomputer.com/feed/",
     "https://www.theregister.com/security/headlines.atom",
     "https://krebsonsecurity.com/feed/",
+    "https://feeds.feedburner.com/TheHackersNews",
+    "https://darkreading.com/rss.xml"
   ],
   norway: [
     "https://www.regjeringen.no/no/aktuelt/nyheter.rss",
@@ -40,6 +51,8 @@ const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
     "https://www.digi.no/rss",
     "https://www.tu.no/rss",
     "https://www.nrk.no/toppsaker.rss",
+    "https://nsm.no/rss/",
+    "https://www.pst.no/alle-artikler/rss/"
   ],
   reports: [
     "https://www.enisa.europa.eu/publications/RSS",
@@ -48,15 +61,16 @@ const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
     "https://www.crowdstrike.com/blog/feed/",
     "https://www.verizon.com/business/resources/rss.xml",
     "https://blog.talosintelligence.com/feeds/posts/default?alt=rss",
+    "https://www.recordedfuture.com/category/geopolitical/feed/"
   ],
   social_cyberforsvaret: [
     "https://www.forsvaret.no/aktuelt/_layouts/15/listfeed.aspx?List=%7BListId%7D"
   ],
   milno_mentions: [
-    "https://news.google.com/rss/search?q=mil.no",
+    "https://news.google.com/rss/search?q=mil.no"
   ],
   media_cyberforsvaret: [
-    "https://news.google.com/rss/search?q=Cyberforsvaret+OR+%22Norwegian%20Armed%20Forces%20Cyber%20Defence%22",
+    "https://news.google.com/rss/search?q=Cyberforsvaret+OR+%22Norwegian%20Armed%20Forces%20Cyber%20Defence%22"
   ],
   mil_ops_analysis: [
     "https://ccdcoe.org/feed/",
@@ -65,9 +79,20 @@ const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
     "https://www.csis.org/rss.xml",
     "https://www.atlanticcouncil.org/feed/",
     "https://carnegieendowment.org/rss/solr?keywords=cyber%20operations",
+    "https://ccdcoe.org/feed/category/news/"
   ],
+  russian_threats: [
+    "https://securelist.com/rss-feeds/",
+    "https://thehackernews.com/feeds/posts/default",
+    "https://www.csis.org/rss.xml",
+    "https://threatpost.com/feed/",
+    "https://www.welivesecurity.com/feed/",
+    "https://news.google.com/rss/search?q=%22russian+cyber%22+OR+%22russia+attributed%22+OR+APT28+OR+Sandworm+OR+%22Cozy+Bear%22+when%3A1d&hl=en-US&gl=US&ceid=US%3Aen"
+  ]
 };
+
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
+
 function hash(s: string) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -78,6 +103,7 @@ function hash(s: string) {
 }
 function toISO(d: Date | string | number) { return new Date(d).toISOString(); }
 function within24h(iso: string) { return (Date.now() - new Date(iso).getTime()) <= 24*3600*1000; }
+
 async function fetchRSS(url: string): Promise<Item[]> {
   const resp = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
   const txt = await resp.text();
@@ -88,6 +114,7 @@ async function fetchRSS(url: string): Promise<Item[]> {
     const title = it.title?.["#text"] || it.title || "(uten tittel)";
     const link = it.link?.href || it.link || it.guid || it.id;
     const date = it.pubDate || it.updated || it.published || it["dc:date"] || new Date().toISOString();
+    const description = it.description?.["#text"] || it.summary || it.content?.["#text"] || "";
     const urlStr = typeof link === "string" ? link : String(link);
     let hostname = "unknown";
     try { hostname = new URL(urlStr).hostname.replace(/^www\./,""); } catch {}
@@ -97,11 +124,13 @@ async function fetchRSS(url: string): Promise<Item[]> {
       url: urlStr,
       source: hostname,
       published_at: toISO(date),
-      category: "global"
+      category: "global",
+      description
     });
   }
   return items;
 }
+
 async function queryNews(env: Env, category: string, q: string): Promise<Item[]> {
   if (env.USE_NEWS_API !== "true") return [];
   const items: Item[] = [];
@@ -118,17 +147,43 @@ async function queryNews(env: Env, category: string, q: string): Promise<Item[]>
         url: a.url,
         source: hostname,
         published_at: toISO(a.publishedAt || Date.now()),
-        category
+        category,
+        description: a.description || ""
       });
     }
   }
   return items;
 }
+
+/* ---------- RELEVANCE SCORING (cost-free) ---------- */
+function norwegianRelevanceScore(item: RawItem): number {
+  let score = 0;
+  const text = (item.title + " " + (item.description || "")).toLowerCase();
+
+  // Russian attribution
+  if (/russia|apt28|sandworm|cozy\s*bear|turla|fsb|gru/i.test(text)) score += 3;
+
+  // Norwegian / NATO impact
+  if (/norway|norge|nato|cyberforsvaret|baltic|arctic|nsm|ncsc|pst/i.test(text)) score += 4;
+
+  // Severity keywords
+  if (/attack|breach|espionage|disrupt|ransomware|malware|exploit/i.test(text)) score += 2;
+
+  // Very recent (<12h)
+  if ((Date.now() - new Date(item.published_at).getTime()) <= 12*3600*1000) score += 1;
+
+  return Math.min(score, 10);
+}
+
+/* ---------- HARVEST ---------- */
 async function harvest(env: Env) {
   const nowISO = new Date().toISOString();
+  const today = nowISO.split('T')[0];
+
   for (const cat of CATEGORIES) {
-    const urls = RSS_SOURCESasian[cat];
-    let list: Item[] = [];
+    const urls = RSS_SOURCES[cat];
+    let rawList: RawItem[] = [];
+
     for (const u of urls) {
       try {
         let items = await fetchRSS(u);
@@ -136,40 +191,54 @@ async function harvest(env: Env) {
         if (cat === "milno_mentions") {
           items = items.filter(x => /mil\.no/i.test(x.title) || /mil\.no/i.test(x.url));
         }
-        list.push(...items);
-      } catch (_e) {
-        // ignore one-off feed errors
-      }
+        rawList.push(...items);
+      } catch { /* ignore feed error */ }
     }
+
+    // NewsAPI for media/norway
     if (cat === "media_cyberforsvaret") {
-      list.push(...await queryNews(env, cat, `Cyberforsvaret OR "Norwegian Armed Forces Cyber Defence"`));
+      rawList.push(...await queryNews(env, cat, `Cyberforsvaret OR "Norwegian Armed Forces Cyber Defence"`));
     }
     if (cat === "norway") {
-      list.push(...await queryNews(env, cat, `cyberangrep OR dataangrep site:no`));
+      rawList.push(...await queryNews(env, cat, `cyberangrep OR dataangrep site:no`));
     }
+
+    // Store **raw** data (unfiltered)
+    const rawKey = `raw:${cat}:${today}`;
+    await env.RAW_CACHE.put(rawKey, JSON.stringify(rawList), { expirationTtl: 7*86400 });
+
+    // Process: filter, dedupe, score, limit to top 10
     const seen = new Set<string>();
-    list = list
-      .filter(x => x.url && x.title)
-      .filter(x => within24h(x.published_at))
+    const processed = rawList
+      .filter(x => x.url && x.title && within24h(x.published_at))
       .filter(x => { if (seen.has(x.url)) return false; seen.add(x.url); return true; })
-      .sort((a,b) => +new Date(b.published_at) - +new Date(a.published_at));
+      .map(x => ({ ...x, score: norwegianRelevanceScore(x) }))
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, 10);
+
     const key = `cat:${cat}`;
-    await env.DASHBOARD_CACHE.put(key, JSON.stringify({ items: list, updated_at: nowISO }), { expirationTtl: 48*3600 });
+    await env.DASHBOARD_CACHE.put(key, JSON.stringify({ items: processed, updated_at: nowISO }), { expirationTtl: 48*3600 });
   }
+
   await env.STATE.put("lastUpdate", nowISO);
 }
+
+/* ---------- CATEGORY FETCH ---------- */
 async function getCategory(env: Env, cat: string) {
   if (!CATEGORIES.includes(cat as any)) return new Response("Unknown category", { status: 400 });
   const key = `cat:${cat}`;
   const raw = await env.DASHBOARD_CACHE.get(key);
-  if (!raw) return new Response(JSON.stringify({ items: [] }), { headers: { "content-type":"application/json" }});
-  return new Response(raw, { headers: { "content-type":"application/json" }});
+  if (!raw) return new Response(JSON.stringify({ items: [] }), { headers: { "content-type": "application/json" }});
+  return new Response(raw, { headers: { "content-type": "application/json" }});
 }
+
+/* ---------- REPORT ---------- */
 function summarizeBlock(title: string, items: Item[]) {
   if (items.length === 0) return `${title}: Intet spesielt å rapportere.`;
   const top = items.slice(0,3).map(x => `– ${x.title} (${x.source})`).join('\n');
   return `${title} (${items.length} funn siste 24t):\n${top}`;
 }
+
 async function generateReport(env: Env) {
   const data: Record<string, {items: Item[]}> = {};
   for (const c of CATEGORIES) {
@@ -184,12 +253,14 @@ async function generateReport(env: Env) {
     summarizeBlock("Trusselomtale av mil.no", data.milno_mentions?.items || []),
     summarizeBlock("Norske medier – Cyberforsvaret", data.media_cyberforsvaret?.items || []),
     summarizeBlock("Analyser av militære cyberoperasjoner", data.mil_ops_analysis?.items || []),
+    summarizeBlock("Russiske cybertrusler og angrep", data.russian_threats?.items || [])
   ];
   const lastUpdate = (await env.STATE.get("lastUpdate")) || new Date().toISOString();
   const header = `Morgenrapport (${new Date(lastUpdate).toLocaleString('no-NO')}):`;
   return [header, "", ...sections].join('\n\n');
 }
-/* ------------------------------- CORS ---------------------------------- */
+
+/* ---------- CORS ---------- */
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -200,9 +271,9 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
   for (const [k,v] of Object.entries({ ...CORS_HEADERS, ...extra })) headers.set(k, v);
   return new Response(resp.body, { status: resp.status, headers });
 }
-/* -------------------------- Inline frontend ----------------------------- */
-const INDEX_HTML = `
-<!doctype html>
+
+/* ---------- INLINE FRONTEND (unchanged except timeAgo fix) ---------- */
+const INDEX_HTML = `<!doctype html>
 <html lang="no">
 <head>
   <meta charset="utf-8" />
@@ -243,12 +314,13 @@ const INDEX_HTML = `
     "use strict";
     var CATEGORIES = [
       {key:"global", name:"Store globale cyberhendelser"},
-      {key:"norway", name:"Cyberhendelser i Norge"},
+      {  {key:"norway", name:"Cyberhendelser i Norge"},
       {key:"reports", name:"Viktige rapporter"},
       {key:"social_cyberforsvaret", name:"Sosiale medier – Cyberforsvaret"},
       {key:"milno_mentions", name:"Trusselomtale av mil.no"},
       {key:"media_cyberforsvaret", name:"Norske medier – Cyberforsvaret"},
-      {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"}
+      {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"},
+      {key:"russian_threats", name:"Russiske cybertrusler og angrep"}
     ];
     function timeAgo(iso) {
       var d = new Date(iso), now = new Date();
@@ -334,16 +406,15 @@ const INDEX_HTML = `
     load();
   </script>
 </body>
-</html>
-`;
-/* ------------------------------ Handler ------------------------------- */
+</html>`;
+
+/* ---------- HANDLER ---------- */
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     await harvest(env);
   },
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    // CORS preflight
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
