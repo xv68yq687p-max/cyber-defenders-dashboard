@@ -76,7 +76,6 @@ async function filterWithAI(ai: any, hits: any[]) {
   }
 }
 
-// Embedded HTML — **MUST BE EXACT**
 const INDEX_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
