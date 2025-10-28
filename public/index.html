@@ -5,39 +5,290 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cyber Defenders Dashboard (Lokal)</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 50; }
+    .modal-content { max-width: 800px; max-height: 90vh; overflow-y: auto; }
+  </style>
 </head>
 <body class="bg-slate-950 text-slate-100">
-<header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
-<div class="max-w-7xl mx-auto px-4 py-4 space-y-3">
-<h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
-<div class="flex items-center gap-3">
-<input id="apiBase" class="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800" placeholder="https://cyber-defenders-dashboard.<konto>.workers.dev">
-<button id="saveBase" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700">Lagre</button>
-<button id="testBtn" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">Test</button>
-<span id="connStatus" class="text-sm"></span>
-</div>
-<div class="flex items-center gap-3">
-<span id="last-updated" class="text-sm text-slate-300">Ikke tilkoblet</span>
-<button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater</button>
-<button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
-<button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
-</div>
-</div>
-</header>
-<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-<section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
-<textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800" readonly></textarea>
-</main>
-<script>
-function getApiBase(){return (localStorage.getItem('apiBase')||'').replace(/\/+$/, '');}
-function setApiBase(v){localStorage.setItem('apiBase',(v||'').trim());}
-async function safeFetch(url,opt={}){return fetch(url,{mode:'cors',...opt});}
-const apiBaseInput=document.getElementById('apiBase');apiBaseInput.value=getApiBase();
-document.getElementById('saveBase').onclick=()=>{setApiBase(apiBaseInput.value);document.getElementById('connStatus').textContent='Lagret';}
-document.getElementById('testBtn').onclick=async()=>{try{const r=await safeFetch(getApiBase()+'/api/health');if(!r.ok)throw 0;document.getElementById('connStatus').textContent='OK';}catch{document.getElementById('connStatus').textContent='Feil';}};
-document.getElementById('refreshBtn').onclick=()=>safeFetch(getApiBase()+'/api/refresh',{method:'POST'});
-document.getElementById('reportBtn').onclick=async()=>{const r=await safeFetch(getApiBase()+'/api/report');const t=await r.text();document.getElementById('report').value=t;document.getElementById('speakBtn').disabled=false;}
-document.getElementById('speakBtn').onclick=()=>{const t=document.getElementById('report').value;if(!t)return;const u=new SpeechSynthesisUtterance(t);u.lang='nb-NO';speechSynthesis.speak(u);};
-</script>
+  <!-- HEADER -->
+  <header class="sticky top-0 z-10 bg-slate-900/80 backdrop-blur border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 py-4 space-y-3">
+      <h1 class="text-xl font-bold">Cyber Defenders Dashboard</h1>
+
+      <!-- API BASE -->
+      <div class="flex flex-col sm:flex-row items-center gap-3">
+        <input id="apiBase" class="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-400" 
+               placeholder="https://cyber-defenders-dashboard.<konto>.workers.dev" 
+               value="https://cyber-defenders-dashboard.frqkb7zyfq.workers.dev">
+        <div class="flex items-center gap-2">
+          <button id="saveBase" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700">Lagre</button>
+          <button id="testBtn" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">Test</button>
+          <span id="connStatus" class="text-sm text-slate-300"></span>
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="flex flex-wrap items-center gap-3">
+        <span id="last-updated" class="text-sm text-slate-300">Ikke tilkoblet</span>
+        <button id="refreshBtn" class="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500">Oppdater nå</button>
+        <button id="reportBtn" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Generer rapport</button>
+        <button id="weekBtn" class="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">Siste uke</button>
+        <button id="backTo24Btn" class="px-3 py-2 rounded-xl bg-gray-600 hover:bg-gray-500 hidden">Tilbake til 24 timer</button>
+        <button id="speakBtn" class="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500" disabled>Les opp</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN DASHBOARD -->
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <section id="cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></section>
+
+    <!-- WEEKLY AGGREGATED VIEW (hidden by default) -->
+    <section id="weekly-view" class="hidden space-y-6">
+      <h2 class="text-2xl font-bold text-center">Siste 7 dagers dash</h2>
+      <div id="weekly-cards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+    </section>
+  </main>
+
+  <!-- REPORT MODAL -->
+  <div id="reportModal" class="modal flex items-center justify-center">
+    <div class="modal-content bg-slate-900 p-6 rounded-xl border border-slate-700">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold">Morgenrapport</h2>
+        <button id="closeModal" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+      </div>
+      <textarea id="reportText" class="w-full h-96 p-3 rounded bg-slate-800 border border-slate-700 text-sm" readonly></textarea>
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="copyReport" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded">Kopier</button>
+        <button id="speakReport" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded">Les opp</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CARD TEMPLATE -->
+  <template id="card-tpl">
+    <article class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+      <h2 class="text-lg font-semibold text-sky-400 mb-2"></h2>
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs rounded-lg px-2 py-1 bg-slate-800"></span>
+      </div>
+      <ul class="space-y-2"></ul>
+      <div class="text-sm text-slate-400 mt-2"></div>
+    </article>
+  </template>
+
+  <script>
+    "use strict";
+
+    const CATEGORIES = [
+      {key:"global", name:"Store globale cyberhendelser"},
+      {key:"norway", name:"Cyberhendelser i Norge"},
+      {key:"reports", name:"Viktige rapporter"},
+      {key:"social_cyberforsvaret", name:"Sosiale medier – Cyberforsvaret"},
+      {key:"milno_mentions", name:"Trusselomtale av mil.no"},
+      {key:"media_cyberforsvaret", name:"Norske medier – Cyberforsvaret"},
+      {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"},
+      {key:"russian_threats", name:"Russiske cybertrusler og angrep"}
+    ];
+
+    function getApiBase() {
+      return (localStorage.getItem('apiBase') || 'https://cyber-defenders-dashboard.frqkb7zyfq.workers.dev').replace(/\/+$/, '');
+    }
+    function setApiBase(v) { localStorage.setItem('apiBase', (v||'').trim()); }
+
+    async function safeFetch(url, opt = {}) {
+      try { return await fetch(url, { mode: 'cors', ...opt }); }
+      catch (e) { console.error(e); throw e; }
+    }
+
+    const apiInput = document.getElementById('apiBase');
+    const cardsEl = document.getElementById('cards');
+    const weeklyEl = document.getElementById('weekly-view');
+    const weeklyCards = document.getElementById('weekly-cards');
+    const modal = document.getElementById('reportModal');
+    const reportText = document.getElementById('reportText');
+    const tpl = document.getElementById('card-tpl');
+    const weekBtn = document.getElementById('weekBtn');
+    const backTo24Btn = document.getElementById('backTo24Btn');
+
+    apiInput.value = getApiBase();
+
+    function timeAgo(iso) {
+      const d = new Date(iso), now = new Date();
+      const diffSec = Math.max(0, (now - d) / 1000);
+      const h = Math.floor(diffSec / 3600);
+      if (h < 1) return Math.floor(diffSec/60) + " min siden";
+      if (h < 24) return h + " t siden";
+      return d.toLocaleDateString('no-NO');
+    }
+
+    function makeItemHtml(it) {
+      return `<a class="hover:underline" href="${it.url}" target="_blank" rel="noopener">${it.title}</a>` +
+             `<div class="text-xs text-slate-400">${it.source} • ${timeAgo(it.published_at)}</div>`;
+    }
+
+    async function loadDashboard(isWeekly = false) {
+      const target = isWeekly ? weeklyCards : cardsEl;
+      const lastUpdatedEl = document.getElementById('last-updated');
+      target.innerHTML = '';
+      lastUpdatedEl.textContent = 'Laster…';
+
+      for (const cat of CATEGORIES) {
+        try {
+          const endpoint = isWeekly ? `/api/weekly?category=${cat.key}` : `/api/items?category=${cat.key}`;
+          const res = await safeFetch(`${getApiBase()}${endpoint}`);
+          const data = await res.json();
+          const node = tpl.content.cloneNode(true);
+          const art = node.querySelector('article');
+          const header = art.querySelector('h2');
+          const countSpan = art.querySelector('span');
+          const ul = art.querySelector('ul');
+          const emptyDiv = art.querySelector('div:last-child');
+
+          header.textContent = cat.name;
+          countSpan.textContent = `${data.items?.length || 0} funn`;
+
+          if (!data.items || data.items.length === 0) {
+            emptyDiv.textContent = 'Intet spesielt å rapportere';
+            emptyDiv.classList.remove('empty:hidden');
+          } else {
+            const upto = Math.min(5, data.items.length);
+            for (let j = 0; j < upto; j++) {
+              const li = document.createElement('li');
+              li.innerHTML = makeItemHtml(data.items[j]);
+              ul.appendChild(li);
+            }
+            if (data.items.length > 5) {
+              const more = document.createElement('button');
+              more.className = 'mt-2 text-sm text-sky-400 hover:underline';
+              more.textContent = `Vis alle (${data.items.length})`;
+              more.onclick = () => {
+                ul.innerHTML = '';
+                data.items.forEach(it => {
+                  const li = document.createElement('li');
+                  li.innerHTML = makeItemHtml(it);
+                  ul.appendChild(li);
+                });
+                more.remove();
+              };
+              art.appendChild(more);
+            }
+            emptyDiv.classList.add('empty:hidden');
+          }
+          target.appendChild(node);
+        } catch (e) {
+          console.error(`Failed ${cat.key}:`, e);
+        }
+      }
+
+      try {
+        const health = await safeFetch(`${getApiBase()}/api/health`).then(r => r.json());
+        lastUpdatedEl.textContent = health.lastUpdate ? `Oppdatert ${timeAgo(health.lastUpdate)}` : 'Oppdatert nylig';
+      } catch {
+        lastUpdatedEl.textContent = 'Ikke tilkoblet';
+      }
+    }
+
+    // VISNINGSKONTROLL
+    function show24HourView() {
+      weeklyEl.classList.add('hidden');
+      cardsEl.parentElement.classList.remove('hidden');
+      weekBtn.classList.remove('hidden');
+      backTo24Btn.classList.add('hidden');
+      loadDashboard(false);
+    }
+
+    function showWeeklyView() {
+      weeklyEl.classList.remove('hidden');
+      cardsEl.parentElement.classList.add('hidden');
+      weekBtn.classList.add('hidden');
+      backTo24Btn.classList.remove('hidden');
+      loadDashboard(true);
+    }
+
+    async function openReport() {
+      try {
+        const r = await safeFetch(`${getApiBase()}/api/report`);
+        const txt = await r.text();
+        reportText.value = txt;
+        modal.style.display = 'flex';
+        document.getElementById('speakBtn').disabled = false;
+      } catch (e) {
+        alert('Kunne ikke hente rapport');
+      }
+    }
+
+    let voicesLoaded = false;
+    function loadVoices() {
+      if (voicesLoaded) return;
+      const preferred = ['Google norsk', 'Microsoft Helge', 'nb-NO'];
+      const all = speechSynthesis.getVoices();
+      return all.find(v => preferred.some(p => v.name.includes(p) || v.lang === 'nb-NO')) || all[0];
+    }
+    speechSynthesis.onvoiceschanged = () => { voicesLoaded = true; };
+
+    function speakText(text) {
+      speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'nb-NO';
+      const voice = loadVoices();
+      if (voice) utter.voice = voice;
+      utter.rate = 0.9;
+      utter.pitch = 1;
+      speechSynthesis.speak(utter);
+    }
+
+    // EVENT LISTENERS
+    document.getElementById('saveBase').onclick = () => {
+      setApiBase(apiInput.value);
+      document.getElementById('connStatus').textContent = 'Lagret';
+      show24HourView();
+    };
+
+    document.getElementById('testBtn').onclick = async () => {
+      const status = document.getElementById('connStatus');
+      try {
+        const r = await safeFetch(`${getApiBase()}/api/health`);
+        if (!r.ok) throw 0;
+        status.textContent = 'Tilkobling OK';
+        status.className = 'text-sm text-green-400';
+      } catch {
+        status.textContent = 'Tilkoblingsfeil';
+        status.className = 'text-sm text-red-400';
+      }
+    };
+
+    document.getElementById('refreshBtn').onclick = async () => {
+      await safeFetch(`${getApiBase()}/api/refresh`, { method: 'POST' });
+      show24HourView();
+    };
+
+    document.getElementById('reportBtn').onclick = openReport;
+
+    document.getElementById('weekBtn').onclick = showWeeklyView;
+    document.getElementById('backTo24Btn').onclick = show24HourView;
+
+    document.getElementById('speakBtn').onclick = () => {
+      const text = reportText.value || '';
+      if (text) speakText(text);
+    };
+
+    document.getElementById('closeModal').onclick = () => {
+      modal.style.display = 'none';
+    };
+
+    document.getElementById('copyReport').onclick = () => {
+      navigator.clipboard.writeText(reportText.value);
+      alert('Rapport kopiert!');
+    };
+
+    document.getElementById('speakReport').onclick = () => speakText(reportText.value);
+
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+    // INITIAL LOAD
+    show24HourView();
+  </script>
 </body>
 </html>
