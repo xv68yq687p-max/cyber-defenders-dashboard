@@ -17,5 +17,12 @@ id = "c1c8fe1fe98b4bfd9c99682e18ce88e4"
 binding = "RAW_CACHE"
 id = "73f8635104384071ad069a74598262b6"
 
+name = "cyber-defenders-dashboard"
+main = "worker.js"
+compatibility_date = "2025-10-28"
+
+[ai]
+binding = "AI"  
+
 [vars]
 USE_NEWS_API = "false"
