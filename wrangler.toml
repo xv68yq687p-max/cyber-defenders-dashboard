@@ -13,5 +13,9 @@ id = "b52e1a5169884dcd93a4b5227733f460"
 binding = "STATE"
 id = "c1c8fe1fe98b4bfd9c99682e18ce88e4"
 
+[[kv_namespaces]]
+binding = "RAW_CACHE"
+id = "73f8635104384071ad069a74598262b6"
+
 [vars]
 USE_NEWS_API = "false"
