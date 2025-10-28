@@ -2,7 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 type Env = {
   DASHBOARD_CACHE: KVNamespace;
-  RAW_CACHE: KVNamespace;          // <-- NEW BINDING
+  RAW_CACHE: KVNamespace;
   STATE: KVNamespace;
   ADMIN_TOKEN?: string;
   USE_NEWS_API?: string;
@@ -17,7 +17,7 @@ type Item = {
   source: string;
   published_at: string;
   category: string;
-  description?: string;            // <-- NEW (optional snippet)
+  description?: string;
 };
 
 type RawItem = Item & { score?: number };
@@ -30,7 +30,7 @@ const CATEGORIES = [
   "milno_mentions",
   "media_cyberforsvaret",
   "mil_ops_analysis",
-  "russian_threats"               // <-- NEW CATEGORY
+  "russian_threats"
 ] as const;
 
 const RSS_SOURCES: Record<typeof CATEGORIES[number], string[]> = {
@@ -155,27 +155,18 @@ async function queryNews(env: Env, category: string, q: string): Promise<Item[]>
   return items;
 }
 
-/* ---------- RELEVANCE SCORING (cost-free) ---------- */
 function norwegianRelevanceScore(item: RawItem): number {
   let score = 0;
   const text = (item.title + " " + (item.description || "")).toLowerCase();
 
-  // Russian attribution
   if (/russia|apt28|sandworm|cozy\s*bear|turla|fsb|gru/i.test(text)) score += 3;
-
-  // Norwegian / NATO impact
   if (/norway|norge|nato|cyberforsvaret|baltic|arctic|nsm|ncsc|pst/i.test(text)) score += 4;
-
-  // Severity keywords
   if (/attack|breach|espionage|disrupt|ransomware|malware|exploit/i.test(text)) score += 2;
-
-  // Very recent (<12h)
   if ((Date.now() - new Date(item.published_at).getTime()) <= 12*3600*1000) score += 1;
 
   return Math.min(score, 10);
 }
 
-/* ---------- HARVEST ---------- */
 async function harvest(env: Env) {
   const nowISO = new Date().toISOString();
   const today = nowISO.split('T')[0];
@@ -192,10 +183,9 @@ async function harvest(env: Env) {
           items = items.filter(x => /mil\.no/i.test(x.title) || /mil\.no/i.test(x.url));
         }
         rawList.push(...items);
-      } catch { /* ignore feed error */ }
+      } catch { }
     }
 
-    // NewsAPI for media/norway
     if (cat === "media_cyberforsvaret") {
       rawList.push(...await queryNews(env, cat, `Cyberforsvaret OR "Norwegian Armed Forces Cyber Defence"`));
     }
@@ -203,11 +193,9 @@ async function harvest(env: Env) {
       rawList.push(...await queryNews(env, cat, `cyberangrep OR dataangrep site:no`));
     }
 
-    // Store **raw** data (unfiltered)
     const rawKey = `raw:${cat}:${today}`;
     await env.RAW_CACHE.put(rawKey, JSON.stringify(rawList), { expirationTtl: 7*86400 });
 
-    // Process: filter, dedupe, score, limit to top 10
     const seen = new Set<string>();
     const processed = rawList
       .filter(x => x.url && x.title && within24h(x.published_at))
@@ -223,7 +211,6 @@ async function harvest(env: Env) {
   await env.STATE.put("lastUpdate", nowISO);
 }
 
-/* ---------- CATEGORY FETCH ---------- */
 async function getCategory(env: Env, cat: string) {
   if (!CATEGORIES.includes(cat as any)) return new Response("Unknown category", { status: 400 });
   const key = `cat:${cat}`;
@@ -232,7 +219,37 @@ async function getCategory(env: Env, cat: string) {
   return new Response(raw, { headers: { "content-type": "application/json" }});
 }
 
-/* ---------- REPORT ---------- */
+// NEW: Get aggregated raw items from last 7 days
+async function getWeekly(env: Env, cat: string) {
+  if (!CATEGORIES.includes(cat as any)) return new Response("Unknown category", { status: 400 });
+
+  const now = new Date();
+  const weekItems: RawItem[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 6; i >= 0; i--) { // Last 7 days
+    const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = date.toISOString().split('T')[0];
+    const rawKey = `raw:${cat}:${dateStr}`;
+    const raw = await env.RAW_CACHE.get(rawKey);
+    if (raw) {
+      const items = JSON.parse(raw) as RawItem[];
+      items.forEach(item => {
+        if (!seen.has(item.url) && !within24h(item.published_at) === false) { // Include all, even older
+          seen.add(item.url);
+          weekItems.push({ ...item, score: norwegianRelevanceScore(item) });
+        }
+      });
+    }
+  }
+
+  const sorted = weekItems
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, 20); // Top 20 for weekly view
+
+  return new Response(JSON.stringify({ items: sorted }), { headers: { "content-type": "application/json" }});
+}
+
 function summarizeBlock(title: string, items: Item[]) {
   if (items.length === 0) return `${title}: Intet spesielt å rapportere.`;
   const top = items.slice(0,3).map(x => `– ${x.title} (${x.source})`).join('\n');
@@ -260,7 +277,6 @@ async function generateReport(env: Env) {
   return [header, "", ...sections].join('\n\n');
 }
 
-/* ---------- CORS ---------- */
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -272,7 +288,6 @@ function withCors(resp: Response, extra: Record<string,string> = {}) {
   return new Response(resp.body, { status: resp.status, headers });
 }
 
-/* ---------- INLINE FRONTEND (unchanged except timeAgo fix) ---------- */
 const INDEX_HTML = `<!doctype html>
 <html lang="no">
 <head>
@@ -299,149 +314,4 @@ const INDEX_HTML = `<!doctype html>
       <article class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
         <div class="flex items-center justify-between mb-2">
           <h2 class="font-semibold"></h2>
-          <span class="text-xs rounded-lg px-2 py-1 bg-slate-800"></span>
-        </div>
-        <ul class="space-y-2"></ul>
-        <div class="text-sm text-slate-400 mt-2 empty:hidden"></div>
-      </article>
-    </template>
-    <section>
-      <h2 class="text-lg font-semibold mb-2">Morgenrapport</h2>
-      <textarea id="report" class="w-full h-48 p-3 rounded-xl bg-slate-900 border border-slate-800" placeholder="Klikk “Generer rapport”" readonly></textarea>
-    </section>
-  </main>
-  <script>
-    "use strict";
-    var CATEGORIES = [
-      {key:"global", name:"Store globale cyberhendelser"},
-      {  {key:"norway", name:"Cyberhendelser i Norge"},
-      {key:"reports", name:"Viktige rapporter"},
-      {key:"social_cyberforsvaret", name:"Sosiale medier – Cyberforsvaret"},
-      {key:"milno_mentions", name:"Trusselomtale av mil.no"},
-      {key:"media_cyberforsvaret", name:"Norske medier – Cyberforsvaret"},
-      {key:"mil_ops_analysis", name:"Analyser av militære cyberoperasjoner"},
-      {key:"russian_threats", name:"Russiske cybertrusler og angrep"}
-    ];
-    function timeAgo(iso) {
-      var d = new Date(iso), now = new Date();
-      var timeDiffSec = Math.max(0, (now - d) / 1000);
-      var h = Math.floor(timeDiffSec / 3600);
-      if (h < 1) return String(Math.floor(timeDiffSec/60)) + " min siden";
-      if (h < 24) return String(h) + " t siden";
-      return d.toLocaleString('no-NO');
-    }
-    var cardsEl = document.getElementById('cards');
-    var tpl = document.getElementById('card-tpl');
-    function makeItemHtml(it) {
-      return '<a class="hover:underline" href="' + it.url + '" target="_blank" rel="noopener">' + it.title + '</a>' +
-             '<div class="text-xs text-slate-400">' + it.source + ' • ' + timeAgo(it.published_at) + '</div>';
-    }
-    async function load() {
-      document.getElementById('last-updated').textContent = 'Laster…';
-      cardsEl.innerHTML = '';
-      for (var i=0; i<CATEGORIES.length; i++) {
-        var cat = CATEGORIES[i];
-        var res = await fetch('/api/items?category=' + encodeURIComponent(cat.key));
-        var data = await res.json();
-        var node = tpl.content.cloneNode(true);
-        var art = node.querySelector('article');
-        art.querySelector('h2').textContent = cat.name;
-        art.querySelector('span').textContent = String((data.items && data.items.length) || 0) + ' funn';
-        var ul = art.querySelector('ul');
-        if (!data.items || data.items.length === 0) {
-          art.querySelector('div').textContent = 'Intet spesielt å rapportere';
-        } else {
-          var upto = Math.min(5, data.items.length);
-          for (var j=0; j<upto; j++) {
-            var it = data.items[j];
-            var li = document.createElement('li');
-            li.innerHTML = makeItemHtml(it);
-            ul.appendChild(li);
-          }
-          if (data.items.length > 5) {
-            var more = document.createElement('button');
-            more.className = 'mt-2 text-sm text-sky-400 hover:underline';
-            more.textContent = 'Vis alle (' + data.items.length + ')';
-            more.onclick = function() {
-              ul.innerHTML = '';
-              for (var k=0; k<data.items.length; k++) {
-                var it2 = data.items[k];
-                var li2 = document.createElement('li');
-                li2.innerHTML = makeItemHtml(it2);
-                ul.appendChild(li2);
-              }
-              more.remove();
-            };
-            art.appendChild(more);
-          }
-        }
-        cardsEl.appendChild(node);
-      }
-      try {
-        var health = await fetch('/api/health').then(function(r){return r.json()});
-        document.getElementById('last-updated').textContent = health.lastUpdate ? ('Oppdatert ' + timeAgo(health.lastUpdate)) : 'Oppdatert nylig';
-      } catch(e) {
-        document.getElementById('last-updated').textContent = 'Oppdatert nylig';
-      }
-    }
-    document.getElementById('refreshBtn').onclick = async function () {
-      await fetch('/api/refresh', {method:'POST'});
-      load();
-    };
-    document.getElementById('reportBtn').onclick = async function () {
-      var res = await fetch('/api/report');
-      var txt = await res.text();
-      var ta = document.getElementById('report');
-      ta.value = txt;
-      document.getElementById('speakBtn').disabled = false;
-    };
-    document.getElementById('speakBtn').onclick = function () {
-      var text = document.getElementById('report').value;
-      if (!text) return;
-      var u = new SpeechSynthesisUtterance(text);
-      u.lang = 'nb-NO';
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(u);
-    };
-    load();
-  </script>
-</body>
-</html>`;
-
-/* ---------- HANDLER ---------- */
-export default {
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
-    await harvest(env);
-  },
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
-    if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
-    if (url.pathname === "/api/health") {
-      const lastUpdate = await env.STATE.get("lastUpdate");
-      return withCors(new Response(JSON.stringify({ lastUpdate }), { headers: {"content-type":"application/json"}}));
-    }
-    if (url.pathname === "/api/items") {
-      const cat = url.searchParams.get("category") || "";
-      const resp = await getCategory(env, cat);
-      return withCors(resp);
-    }
-    if (url.pathname === "/api/report") {
-      const txt = await generateReport(env);
-      return withCors(new Response(txt, { headers: { "content-type":"text/plain; charset=utf-8" }}));
-    }
-    if (url.pathname === "/api/refresh" && req.method === "POST") {
-      const token = req.headers.get("x-admin-token");
-      if (env.ADMIN_TOKEN && token !== env.ADMIN_TOKEN) {
-        return withCors(new Response("Unauthorized", { status: 401 }));
-      }
-      await harvest(env);
-      return withCors(new Response("ok"));
-    }
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(INDEX_HTML, { headers: { "content-type": "text/html; charset=utf-8" }});
-    }
-    return new Response("Not found", { status: 404 });
-  }
-};
+          <span class="text-xs rounded-lg px
