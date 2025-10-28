@@ -1,5 +1,4 @@
 // src/worker.ts - Cyber Defenders Dashboard with AI Filtering
-
 interface Env {
   AI: any;
 }
@@ -23,28 +22,36 @@ const INDEX_HTML = `<!DOCTYPE html>
   <input type="text" id="search" placeholder="Search cyber threats (e.g., ransomware)..." value="attack" />
   <button onclick="search()">Search</button>
   <div id="results">Loading filtered results...</div>
-
   <script>
     async function search() {
-      const q = encodeURIComponent(document.getElementById('search').value || 'cyber');
+      let searchInput = document.getElementById('search').value || 'cyber';
+      searchInput = searchInput.trim(); // Basic sanitization
+      if (!searchInput) {
+        document.getElementById('results').innerHTML = '<i>Please enter a search term.</i>';
+        return;
+      }
+      const q = encodeURIComponent(searchInput);
       try {
-        const res = await fetch(\`/api/search?q=\${q}\`);
+        const res = await fetch('/api/search?q=' + q);
         if (!res.ok) throw new Error('API error');
         const data = await res.json();
         const container = document.getElementById('results');
         if (data.hits && data.hits.length > 0) {
-          container.innerHTML = data.hits.map(h => \`
-            <div class="hit">
-              <h3><a href="\${h.url}" target="_blank" rel="noopener">\${h.title}</a></h3>
-              <p>\${h.snippet}</p>
-              <span class="score">Relevance: \${(h.relevance || 0).toFixed(3)}</span>
-            </div>
-          \`).join('');
+          let html = '';
+          for (let h of data.hits) {
+            // Build HTML with concatenation to avoid template literals
+            html += '<div class="hit">' +
+              '<h3><a href="' + (h.url || '#') + '" target="_blank" rel="noopener">' + (h.title || 'Untitled') + '</a></h3>' +
+              '<p>' + (h.snippet || '') + '</p>' +
+              '<span class="score">Relevance: ' + ((h.relevance || 0).toFixed(3)) + '</span>' +
+            '</div>';
+          }
+          container.innerHTML = html;
         } else {
           container.innerHTML = '<i>No relevant cyber threats found. Try "ransomware" or "APT".</i>';
         }
       } catch (err) {
-        document.getElementById('results').innerHTML = '<i>Error: ' + err.message + '</i>';
+        document.getElementById('results').innerHTML = '<i>Error: ' + (err.message || 'Unknown error') + '</i>';
       }
     }
     document.addEventListener('DOMContentLoaded', search);
@@ -56,21 +63,17 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
-
     if (pathname === '/' || pathname === '/index.html') {
       return new Response(INDEX_HTML, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' }
       });
     }
-
     if (pathname === '/api/search' && request.method === 'GET') {
       const query = url.searchParams.get('q') || 'cyber';
       const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 50);
-
       try {
         const rawHits = await fetchCyberContent(query, limit);
         const filteredHits = await filterWithAI(env.AI, rawHits, query);
-
         return new Response(JSON.stringify({
           query,
           total: filteredHits.length,
@@ -86,7 +89,6 @@ export default {
         return new Response(JSON.stringify({ error: error.message }), { status: 500 });
       }
     }
-
     return new Response('Not Found', { status: 404 });
   }
 } satisfies ExportedHandler<Env>;
@@ -104,15 +106,14 @@ async function fetchCyberContent(query: string, limit: number): Promise<any[]> {
 
 async function filterWithAI(ai: any, hits: any[], userQuery: string): Promise<any[]> {
   const cyberContext = `cyber operations attacks malware ransomware phishing DDoS zero-day APT supply chain intrusion exploit vulnerability CVE ethical hacking red team defense incident response threat intelligence ${userQuery}`;
-  
+ 
   const inputs = hits.map(hit => ({
     query: cyberContext,
     input: `${hit.title} ${hit.snippet}`
   }));
-
   try {
     const results = await ai.run('@cf/baai/bge-reranker-base', { inputs });
-    
+   
     return hits
       .map((hit: any, i: number) => ({
         ...hit,
